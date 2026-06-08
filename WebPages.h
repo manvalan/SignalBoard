@@ -264,32 +264,37 @@ const char info_html[] PROGMEM = R"rawliteral(
 </body></html>
 )rawliteral";
 
-onst char mapping_script_and_legend[] PROGMEM = R"rawliteral(
+const char mapping_script_and_legend[] PROGMEM = R"rawliteral(
   <script>
     document.querySelector('a[href="/mapping"]').classList.add('active');
     
-    // Funzione aggiornata per inviare anche il livello di luminosità (brId)
     function testPin(inputId, brId, btn, colorHex) {
       var pinVal = document.querySelector('input[name="' + inputId + '"]').value;
-      var brVal = document.querySelector('input[name="' + brId + '"]').value; // Legge lo slider
-      
+      var brVal = document.querySelector('input[name="' + brId + '"]').value;
       if(pinVal === "") { alert("Inserisci un canale."); return; }
+      
       var state = btn.classList.contains('active') ? 0 : 1; 
       
-      // Invia il comando all'API includendo &br=
-      fetch('/test_pin?pin=' + pinVal + '&state=' + state + '&br=' + brVal).then(response => {
-        if(response.ok) {
-          if(state === 1) {
-            btn.classList.add('active'); btn.style.backgroundColor = colorHex; btn.style.color = 'white'; btn.innerText = 'SPEGNI';
-          } else {
-            btn.classList.remove('active'); btn.style.backgroundColor = '#555'; btn.style.color = 'white'; btn.innerText = 'TEST';
-          }
-        }
-      });
+      // === OTTIMIZZAZIONE UX: Aggiornamento Grafico Istantaneo ===
+      if(state === 1) {
+        btn.classList.add('active'); 
+        btn.style.backgroundColor = colorHex; 
+        btn.style.color = 'white'; 
+        btn.innerText = 'SPEGNI';
+      } else {
+        btn.classList.remove('active'); 
+        btn.style.backgroundColor = '#555'; 
+        btn.style.color = 'white'; 
+        btn.innerText = 'TEST';
+      }
+
+      // === Esecuzione del comando in background senza bloccare la UI ===
+      fetch('/test_pin?pin=' + pinVal + '&state=' + state + '&br=' + brVal)
+        .catch(error => console.error("Errore di rete:", error));
     }
   </script>
   <style>
-    /* Stile per fare i range slider più belli */
+    /* Stile per fare i range slider più belli e reattivi */
     input[type=range] { width: 90%; margin: 8px 0; cursor: pointer; accent-color: var(--primary-color); }
   </style>
   <div class="legend">

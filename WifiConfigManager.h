@@ -212,23 +212,27 @@ class WifiConfigManager {
             server.send(200, "text/html", html);
         });
 
+        
         server.on("/save_mapping", HTTP_POST, [this]() {
             if (!checkAuth()) return;
             preferences.begin("railway", false);
             for (int i = 1; i <= 4; i++) {
+                // Salva ID e Tipo
                 if (server.hasArg("id_" + String(i))) preferences.putString(("id_" + String(i)).c_str(), server.arg("id_" + String(i)));
                 if (server.hasArg("tipo_" + String(i))) preferences.putInt(("tipo_" + String(i)).c_str(), server.arg("tipo_" + String(i)).toInt());
+                
+                // Salva i canali fisici
                 if (server.hasArg("pinR_" + String(i))) preferences.putInt(("pinR_" + String(i)).c_str(), server.arg("pinR_" + String(i)).toInt());
                 if (server.hasArg("pinG_" + String(i))) preferences.putInt(("pinG_" + String(i)).c_str(), server.arg("pinG_" + String(i)).toInt());
                 if (server.hasArg("pinV_" + String(i))) preferences.putInt(("pinV_" + String(i)).c_str(), server.arg("pinV_" + String(i)).toInt());
                 
-                // Salva anche i nuovi valori di luminosità!
+                // ---> IL PEZZO CHE MANCAVA: SALVA LA LUMINOSITA' <---
                 if (server.hasArg("brR_" + String(i))) preferences.putInt(("brR_" + String(i)).c_str(), server.arg("brR_" + String(i)).toInt());
                 if (server.hasArg("brG_" + String(i))) preferences.putInt(("brG_" + String(i)).c_str(), server.arg("brG_" + String(i)).toInt());
                 if (server.hasArg("brV_" + String(i))) preferences.putInt(("brV_" + String(i)).c_str(), server.arg("brV_" + String(i)).toInt());
             }
             preferences.end();
-            server.send(200, "text/html", "<meta charset='UTF-8'><meta http-equiv='refresh' content='5;url=/'><h2>💾 Mappatura Salvata!</h2>");
+            server.send(200, "text/html", "<meta charset='UTF-8'><meta http-equiv='refresh' content='5;url=/'><h2>💾 Mappatura e Luminosità Salvate!</h2>");
             delay(1000); ESP.restart();
         });
     }
