@@ -20,7 +20,6 @@ const char* topic_sub = "rocrail/service/info/sg";
 const char* topic_client = "rocrail/service/client"; 
 const char* topic_lwt = "railway/status/segnali";
 
-// Variabili per l'ottimizzazione
 unsigned long lastMqttReconnectAttempt = 0;
 String cachedHostname = "signal"; 
 
@@ -42,6 +41,23 @@ String estraiAttributo(String xml, String attributo) {
 
 void inviaFeedbackRocrail(String id, int aspetto, int tipo) {
     if (!mqttClient.connected()) return;
+    String cmdStr = "red"; 
+    
+    if (tipo == 0) {
+        if (aspetto == 1) cmdStr = "green";
+        else if (aspetto == 2) cmdStr = "yellow";
+    } else {
+        if (aspetto == 4) cmdStr = "green";
+        else if (aspetto == 5) cmdStr = "yellow";
+    }
+    
+    // SOSTITUITO "state=" con "cmd="
+    String xml = "<sg id=\"" + id + "\" cmd=\"" + cmdStr + "\"/>";
+    mqttClient.publish(topic_client, xml.c_str());
+}
+/*
+void inviaFeedbackRocrail(String id, int aspetto, int tipo) {
+    if (!mqttClient.connected()) return;
     String stateStr = "red"; 
     
     if (tipo == 0) {
@@ -54,10 +70,9 @@ void inviaFeedbackRocrail(String id, int aspetto, int tipo) {
     String xml = "<sg id=\"" + id + "\" state=\"" + stateStr + "\"/>";
     mqttClient.publish(topic_client, xml.c_str());
 }
+*/
 
-// OTTIMIZZATO: Niente più tempeste I2C e stringhe lente
 void mqttCallback(char* topic, byte* payload, unsigned int length) {
-    // Parsing molto più veloce e leggero per la RAM
     char msgBuffer[length + 1];
     memcpy(msgBuffer, payload, length);
     msgBuffer[length] = '\0';
@@ -80,7 +95,6 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
                     else if (stato == "yellow") aspNum = 5;
                 }
 
-                // FILTRO ANTI-SPAM: Ignora i messaggi doppi di Rocrail
                 if (aspNum != -1 && s.aspettoAttuale != aspNum) {
                     s.hardware->setAspect((SignalAspect)aspNum);
                     s.aspettoAttuale = aspNum;
@@ -96,6 +110,8 @@ String generaStatoJSON() {
     String json = "{";
     json += "\"uptime\":" + String(millis() / 1000) + ",";
     json += "\"mqtt_connected\":" + String(mqttClient.connected() ? "true" : "false") + ",";
+    json += "\"ip\":\"" + WiFi.localIP().toString() + "\",";
+    json += "\"rssi\":" + String(WiFi.RSSI()) + ",";
     json += "\"segnali\":[";
     
     for (size_t i = 0; i < segnaliAttivi.size(); i++) {
@@ -121,8 +137,9 @@ void eseguiTestLogicoWeb(String id, int aspetto) {
     }
 }
 
-void webTestPin(int pin, bool state) {
-    pca.setPWM(pin, 0, state ? 4095 : 0);
+// FUNZIONE AGGIORNATA: Riceve la luminosità dalla pagina Web!
+void webTestPin(int pin, bool state, int brightness) {
+    pca.setPWM(pin, 0, state ? brightness : 0);
 }
 
 void setup() {
@@ -138,11 +155,7 @@ void setup() {
     netManager.begin();
     
     if (!netManager.isSetupMode()) {
-        // Cacheiamo le stringhe lente all'avvio
         cachedHostname = networkConfig.readString("hostname", "signal");
-        String broker = networkConfig.readString("mqtt_host", "plastico.local");
-        
-        mqttClient.setServer(broker.c_str(), mqtt_port);
         mqttClient.setCallback(mqttCallback);
 
         for (int i = 1; i <= 4; i++) {
@@ -154,8 +167,14 @@ void setup() {
                 int pinR = hardwareConfig.readInt(("pinR_" + String(i)).c_str(), 0);
                 int pinG = hardwareConfig.readInt(("pinG_" + String(i)).c_str(), 0);
                 int pinV = hardwareConfig.readInt(("pinV_" + String(i)).c_str(), 0);
+                
+                // LETTURA DELLE LUMINOSITÀ SALVATE (Default a 4095)
+                int brR = hardwareConfig.readInt(("brR_" + String(i)).c_str(), 4095);
+                int brG = hardwareConfig.readInt(("brG_" + String(i)).c_str(), 4095);
+                int brV = hardwareConfig.readInt(("brV_" + String(i)).c_str(), 4095);
 
-                SignalFS* hw = new SignalFS((SignalType)tipo, &pca, pinR, pinG, pinV);
+                // Passa i dati completi al nuovo costruttore di SignalFS!
+                SignalFS* hw = new SignalFS((SignalType)tipo, &pca, pinR, pinG, pinV, brR, brG, brV);
                 hw->begin();
                 segnaliAttivi.push_back({id, tipo, hw, -1}); 
             }
@@ -163,32 +182,40 @@ void setup() {
     }
 }
 
-// OTTIMIZZATO: Nessun blocco nel loop
 void loop() {
     netManager.loop();
     
     if (!netManager.isSetupMode()) {
         if (!mqttClient.connected()) {
             unsigned long now = millis();
-            // Riprova ogni 5 secondi, non intasa il processore
-            if (now - lastMqttReconnectAttempt > 5000) {
+            
+            // Attende 15 secondi tra i tentativi in modo che il web resti velocissimo
+            if (now - lastMqttReconnectAttempt > 15000) {
                 lastMqttReconnectAttempt = now;
-                String lwtMsg = "{\"module\":\"" + cachedHostname + "\", \"status\":\"offline\"}";
                 
-                if (mqttClient.connect(cachedHostname.c_str(), NULL, NULL, topic_lwt, 0, true, lwtMsg.c_str())) {
-                    mqttClient.subscribe(topic_sub);
-                    String onlineMsg = "{\"module\":\"" + cachedHostname + "\", \"status\":\"online\"}";
-                    mqttClient.publish(topic_lwt, onlineMsg.c_str(), true); 
-                    Serial.println("[MQTT] Riconnesso a Rocrail.");
-                } else {
-                    if (mqttClient.connect(cachedHostname.c_str())) {
+                // --- TRADUZIONE mDNS AL VOLO ---
+                IPAddress brokerIP = netManager.getBrokerIP();
+                
+                if (brokerIP.toString() != "0.0.0.0") {
+                    mqttClient.setServer(brokerIP, mqtt_port); // Imposta l'IP risolto
+                    
+                    String lwtMsg = "{\"module\":\"" + cachedHostname + "\", \"status\":\"offline\"}";
+                    if (mqttClient.connect(cachedHostname.c_str(), NULL, NULL, topic_lwt, 0, true, lwtMsg.c_str())) {
                         mqttClient.subscribe(topic_sub);
-                        Serial.println("[MQTT] Riconnesso a Rocrail (No LWT).");
+                        String onlineMsg = "{\"module\":\"" + cachedHostname + "\", \"status\":\"online\"}";
+                        mqttClient.publish(topic_lwt, onlineMsg.c_str(), true); 
+                        Serial.println("[MQTT] Riconnesso a Rocrail tramite mDNS.");
+                    } else {
+                        if (mqttClient.connect(cachedHostname.c_str())) {
+                            mqttClient.subscribe(topic_sub);
+                            Serial.println("[MQTT] Riconnesso a Rocrail (No LWT).");
+                        }
                     }
+                } else {
+                    Serial.println("[MQTT] Errore: mDNS non ha trovato Rocrail. Riprovo tra 15s...");
                 }
             }
         } else {
-            // Eseguiamo il loop MQTT solo se effettivamente connessi
             mqttClient.loop();
         }
     }

@@ -14,7 +14,6 @@ class WifiConfigManager {
     WebServer server;
     Preferences preferences;
     bool setupMode;
-    IPAddress brokerIP;
     
     String ssid;
     String password;
@@ -23,7 +22,8 @@ class WifiConfigManager {
     String webUser = "admin";
     String webPass;
 
-    std::function<void(int, bool)> onTestPin;
+    // Callback aggiornata per accettare la luminosità
+    std::function<void(int, bool, int)> onTestPin;
     std::function<String()> onGetStatusJSON;
     std::function<void(String, int)> onTestSignalLogic;
 
@@ -43,48 +43,23 @@ class WifiConfigManager {
         String apName = "Setup-" + hostname;
         WiFi.softAP(apName.c_str());
         Serial.printf("\n[AP Mode] Rete creata: %s\n", apName.c_str());
-        Serial.print("IP di configurazione: ");
-        Serial.println(WiFi.softAPIP());
-
-        if (MDNS.begin(hostname.c_str())) {
-            MDNS.addService("http", "tcp", 80);
-            Serial.printf("[mDNS] Attivo in Setup! Digita: http://%s.local\n", hostname.c_str());
-        }
+        if (MDNS.begin(hostname.c_str())) { MDNS.addService("http", "tcp", 80); }
     }
 
     void connectSTA() {
-        Serial.printf("[Wi-Fi] Tento la connessione a: %s\n", ssid.c_str());
         WiFi.setHostname(hostname.c_str());
         WiFi.mode(WIFI_STA);
         WiFi.begin(ssid.c_str(), password.c_str());
 
         int tentativi = 0;
-        while (WiFi.status() != WL_CONNECTED && tentativi < 20) { delay(500); Serial.print("."); tentativi++; }
+        while (WiFi.status() != WL_CONNECTED && tentativi < 20) { delay(500); tentativi++; }
 
         if (WiFi.status() == WL_CONNECTED) {
             setupMode = false;
-            Serial.println("\n[Wi-Fi] Connesso!");
-            
             ArduinoOTA.setHostname(hostname.c_str());
             ArduinoOTA.setPassword(webPass.c_str());
             ArduinoOTA.begin();
-            Serial.println("[OTA] Servizio avviato e protetto da password.");
-
-            if (MDNS.begin(hostname.c_str())) {
-                MDNS.addService("http", "tcp", 80);
-                Serial.printf("[mDNS] Attivo in Rete! Digita: http://%s.local\n", hostname.c_str());
-                
-                IPAddress ip;
-                if (ip.fromString(mqtt_server_name)) {
-                    brokerIP = ip;
-                } else {
-                    brokerIP = MDNS.queryHost(mqtt_server_name);
-                    int mDnsAttempts = 0;
-                    while (brokerIP.toString() == "0.0.0.0" && mDnsAttempts < 5) {
-                        delay(2000); brokerIP = MDNS.queryHost(mqtt_server_name); mDnsAttempts++;
-                    }
-                }
-            }
+            if (MDNS.begin(hostname.c_str())) { MDNS.addService("http", "tcp", 80); }
         } else {
             startAP();
         }
@@ -107,22 +82,14 @@ class WifiConfigManager {
 
         server.on("/api/status", HTTP_GET, [this]() {
             if (!checkAuth()) return;
-            if (onGetStatusJSON) {
-                server.send(200, "application/json", onGetStatusJSON());
-            } else {
-                server.send(500, "application/json", "{\"error\":\"Callback JSON non definita\"}");
-            }
+            if (onGetStatusJSON) { server.send(200, "application/json", onGetStatusJSON()); }
         });
 
         server.on("/test_signal", HTTP_GET, [this]() {
             if (!checkAuth()) return;
             if (server.hasArg("id") && server.hasArg("aspect")) {
-                if (onTestSignalLogic) {
-                    onTestSignalLogic(server.arg("id"), server.arg("aspect").toInt());
-                }
+                if (onTestSignalLogic) onTestSignalLogic(server.arg("id"), server.arg("aspect").toInt());
                 server.send(200, "text/plain", "Comando Logico Inviato");
-            } else { 
-                server.send(400, "text/plain", "Parametri Mancanti"); 
             }
         });
 
@@ -190,10 +157,12 @@ class WifiConfigManager {
             server.send(200, "text/html", String(html_header) + String(info_html));
         });
 
+        // Callback di TEST aggiornata: ora riceve la luminosità!
         server.on("/test_pin", HTTP_GET, [this]() {
             if (!checkAuth()) return;
             if (server.hasArg("pin") && server.hasArg("state")) {
-                if (onTestPin) onTestPin(server.arg("pin").toInt(), server.arg("state").toInt() == 1);
+                int br = server.hasArg("br") ? server.arg("br").toInt() : 4095;
+                if (onTestPin) onTestPin(server.arg("pin").toInt(), server.arg("state").toInt() == 1, br);
                 server.send(200, "text/plain", "OK");
             }
         });
@@ -205,11 +174,17 @@ class WifiConfigManager {
             for (int i = 1; i <= 4; i++) {
                 String idKey = "id_" + String(i), tipoKey = "tipo_" + String(i);
                 String pinRKey = "pinR_" + String(i), pinGKey = "pinG_" + String(i), pinVKey = "pinV_" + String(i);
+                String brRKey = "brR_" + String(i), brGKey = "brG_" + String(i), brVKey = "brV_" + String(i); // Chiavi Luminosità
+                
                 String idVal = preferences.getString(idKey.c_str(), "");
                 int tipoVal = preferences.getInt(tipoKey.c_str(), -1);
                 int pinRVal = preferences.getInt(pinRKey.c_str(), 0);
                 int pinGVal = preferences.getInt(pinGKey.c_str(), 0);
                 int pinVVal = preferences.getInt(pinVKey.c_str(), 0);
+                // Legge i valori salvati, altrimenti usa 4095 (max)
+                int brRVal = preferences.getInt(brRKey.c_str(), 4095);
+                int brGVal = preferences.getInt(brGKey.c_str(), 4095);
+                int brVVal = preferences.getInt(brVKey.c_str(), 4095);
 
                 html += "<div class='signal-card'><h3>Slot " + String(i) + "</h3>";
                 html += "<label>ID Rocrail:</label><input type='text' name='" + idKey + "' value='" + idVal + "'>";
@@ -220,15 +195,20 @@ class WifiConfigManager {
 
                 html += "<div class='pin-group'>";
                 html += "<div>🔴 Rosso / C<input type='number' name='" + pinRKey + "' value='" + String(pinRVal) + "'>";
-                html += "<button type='button' class='test-btn' onclick='testPin(\"" + pinRKey + "\", this, \"#F44336\")'>TEST</button></div>";
+                html += "<input type='range' name='" + brRKey + "' min='0' max='4095' value='" + String(brRVal) + "' title='Luminosità'>";
+                html += "<button type='button' class='test-btn' onclick='testPin(\"" + pinRKey + "\", \"" + brRKey + "\", this, \"#F44336\")'>TEST</button></div>";
+                
                 html += "<div>🟡 Giallo / B<input type='number' name='" + pinGKey + "' value='" + String(pinGVal) + "'>";
-                html += "<button type='button' class='test-btn' onclick='testPin(\"" + pinGKey + "\", this, \"#FFC107\")'>TEST</button></div>";
+                html += "<input type='range' name='" + brGKey + "' min='0' max='4095' value='" + String(brGVal) + "' title='Luminosità'>";
+                html += "<button type='button' class='test-btn' onclick='testPin(\"" + pinGKey + "\", \"" + brGKey + "\", this, \"#FFC107\")'>TEST</button></div>";
+                
                 html += "<div>🟢 Verde / A<input type='number' name='" + pinVKey + "' value='" + String(pinVVal) + "'>";
-                html += "<button type='button' class='test-btn' onclick='testPin(\"" + pinVKey + "\", this, \"#4CAF50\")'>TEST</button></div>";
+                html += "<input type='range' name='" + brVKey + "' min='0' max='4095' value='" + String(brVVal) + "' title='Luminosità'>";
+                html += "<button type='button' class='test-btn' onclick='testPin(\"" + pinVKey + "\", \"" + brVKey + "\", this, \"#4CAF50\")'>TEST</button></div>";
                 html += "</div></div>";
             }
             preferences.end();
-            html += "<input type='submit' value='💾 SALVA MAPPATURA'></form></body></html>";
+            html += "<input type='submit' value='💾 SALVA MAPPATURA E LUMINOSITÀ'></form></body></html>";
             server.send(200, "text/html", html);
         });
 
@@ -241,6 +221,11 @@ class WifiConfigManager {
                 if (server.hasArg("pinR_" + String(i))) preferences.putInt(("pinR_" + String(i)).c_str(), server.arg("pinR_" + String(i)).toInt());
                 if (server.hasArg("pinG_" + String(i))) preferences.putInt(("pinG_" + String(i)).c_str(), server.arg("pinG_" + String(i)).toInt());
                 if (server.hasArg("pinV_" + String(i))) preferences.putInt(("pinV_" + String(i)).c_str(), server.arg("pinV_" + String(i)).toInt());
+                
+                // Salva anche i nuovi valori di luminosità!
+                if (server.hasArg("brR_" + String(i))) preferences.putInt(("brR_" + String(i)).c_str(), server.arg("brR_" + String(i)).toInt());
+                if (server.hasArg("brG_" + String(i))) preferences.putInt(("brG_" + String(i)).c_str(), server.arg("brG_" + String(i)).toInt());
+                if (server.hasArg("brV_" + String(i))) preferences.putInt(("brV_" + String(i)).c_str(), server.arg("brV_" + String(i)).toInt());
             }
             preferences.end();
             server.send(200, "text/html", "<meta charset='UTF-8'><meta http-equiv='refresh' content='5;url=/'><h2>💾 Mappatura Salvata!</h2>");
@@ -251,7 +236,8 @@ class WifiConfigManager {
   public:
     WifiConfigManager() : server(80), setupMode(false) {}
 
-    void setTestCallback(std::function<void(int, bool)> cb) { onTestPin = cb; }
+    // La funzione Callback aggiornata con l'INT della luminosità
+    void setTestCallback(std::function<void(int, bool, int)> cb) { onTestPin = cb; }
     void setJsonCallback(std::function<String()> cb) { onGetStatusJSON = cb; }
     void setTestSignalCallback(std::function<void(String, int)> cb) { onTestSignalLogic = cb; }
 
@@ -272,13 +258,18 @@ class WifiConfigManager {
 
     void loop() { 
         server.handleClient(); 
-        if (!setupMode && WiFi.status() == WL_CONNECTED) {
-            ArduinoOTA.handle();
-        }
+        if (!setupMode && WiFi.status() == WL_CONNECTED) { ArduinoOTA.handle(); }
     }
     
     bool isSetupMode() const { return setupMode; }
-    IPAddress getBrokerIP() const { return brokerIP; }
+
+    IPAddress getBrokerIP() {
+        IPAddress ip;
+        if (ip.fromString(mqtt_server_name)) { return ip; }
+        String host = mqtt_server_name;
+        if (host.endsWith(".local")) { host = host.substring(0, host.length() - 6); }
+        return MDNS.queryHost(host);
+    }
 };
 
 #endif
