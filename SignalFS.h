@@ -30,8 +30,9 @@ class SignalFS {
             else if (aspect == ASPECT_GREEN)  { pca->setPWM(pinR, 0, 0);   pca->setPWM(pinG, 0, 0);   pca->setPWM(pinV, 0, brV); }
             else if (aspect == ASPECT_YELLOW) { pca->setPWM(pinR, 0, 0);   pca->setPWM(pinG, 0, brG); pca->setPWM(pinV, 0, 0); }
         } else if (type == TYPE_SHUNT) {
-            if (aspect == ASPECT_STOP)        { pca->setPWM(pinR, 0, brR); pca->setPWM(pinG, 0, brG); pca->setPWM(pinV, 0, 0); }
-            else if (aspect == ASPECT_GO)     { pca->setPWM(pinR, 0, 0);   pca->setPWM(pinG, 0, brG); pca->setPWM(pinV, 0, brV); }
+            // STOP = orizzontale (B+A), GO = verticale (C+B), OBLIQUO = diagonale (C+A)
+            if (aspect == ASPECT_STOP)        { pca->setPWM(pinR, 0, 0);   pca->setPWM(pinG, 0, brG); pca->setPWM(pinV, 0, brV); }
+            else if (aspect == ASPECT_GO)     { pca->setPWM(pinR, 0, brR); pca->setPWM(pinG, 0, brG); pca->setPWM(pinV, 0, 0); }
             else if (aspect == ASPECT_OBLIQUE){ pca->setPWM(pinR, 0, brR); pca->setPWM(pinG, 0, 0);   pca->setPWM(pinV, 0, brV); }
         }
     }

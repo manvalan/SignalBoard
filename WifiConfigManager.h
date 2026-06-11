@@ -88,7 +88,9 @@ class WifiConfigManager {
         server.on("/test_signal", HTTP_GET, [this]() {
             if (!checkAuth()) return;
             if (server.hasArg("id") && server.hasArg("aspect")) {
-                if (onTestSignalLogic) onTestSignalLogic(server.arg("id"), server.arg("aspect").toInt());
+                int aspect = server.arg("aspect").toInt();
+                if (aspect < 0 || aspect > 5) { server.send(400, "text/plain", "Aspetto non valido"); return; }
+                if (onTestSignalLogic) onTestSignalLogic(server.arg("id"), aspect);
                 server.send(200, "text/plain", "Comando Logico Inviato");
             }
         });
@@ -125,7 +127,7 @@ class WifiConfigManager {
             }
         });
 
-        server.on("/hard_reset", HTTP_GET, [this]() {
+        server.on("/hard_reset", HTTP_POST, [this]() {
             if (!checkAuth()) return;
             preferences.begin("network", false); preferences.clear(); preferences.end();
             preferences.begin("railway", false); preferences.clear(); preferences.end();
@@ -157,12 +159,14 @@ class WifiConfigManager {
             server.send(200, "text/html", String(html_header) + String(info_html));
         });
 
-        // Callback di TEST aggiornata: ora riceve la luminosità!
         server.on("/test_pin", HTTP_GET, [this]() {
             if (!checkAuth()) return;
             if (server.hasArg("pin") && server.hasArg("state")) {
+                int pin = server.arg("pin").toInt();
+                if (pin < 0 || pin > 15) { server.send(400, "text/plain", "Pin non valido"); return; }
                 int br = server.hasArg("br") ? server.arg("br").toInt() : 4095;
-                if (onTestPin) onTestPin(server.arg("pin").toInt(), server.arg("state").toInt() == 1, br);
+                if (br < 0) br = 0; if (br > 4095) br = 4095;
+                if (onTestPin) onTestPin(pin, server.arg("state").toInt() == 1, br);
                 server.send(200, "text/plain", "OK");
             }
         });
@@ -171,7 +175,7 @@ class WifiConfigManager {
             if (!checkAuth()) return;
             String html = String(html_header) + String(mapping_script_and_legend);
             preferences.begin("railway", true);
-            for (int i = 1; i <= 4; i++) {
+            for (int i = 1; i <= 5; i++) {
                 String idKey = "id_" + String(i), tipoKey = "tipo_" + String(i);
                 String pinRKey = "pinR_" + String(i), pinGKey = "pinG_" + String(i), pinVKey = "pinV_" + String(i);
                 String brRKey = "brR_" + String(i), brGKey = "brG_" + String(i), brVKey = "brV_" + String(i); // Chiavi Luminosità
@@ -216,7 +220,7 @@ class WifiConfigManager {
         server.on("/save_mapping", HTTP_POST, [this]() {
             if (!checkAuth()) return;
             preferences.begin("railway", false);
-            for (int i = 1; i <= 4; i++) {
+            for (int i = 1; i <= 5; i++) {
                 // Salva ID e Tipo
                 if (server.hasArg("id_" + String(i))) preferences.putString(("id_" + String(i)).c_str(), server.arg("id_" + String(i)));
                 if (server.hasArg("tipo_" + String(i))) preferences.putInt(("tipo_" + String(i)).c_str(), server.arg("tipo_" + String(i)).toInt());

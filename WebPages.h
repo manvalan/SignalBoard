@@ -123,7 +123,7 @@ const char html_header[] PROGMEM = R"rawliteral(
     <a href="/mapping">Hardware</a>
     <a href="/dashboard">Dashboard</a>
     <a href="/info">Info</a>
-    <a href="/hard_reset" class="danger" onclick="return confirm('Cancellare TUTTO e ripristinare il Wemos?');">Hard Reset</a>
+    <a href="#" class="danger" onclick="if(confirm('Cancellare TUTTO e ripristinare il Wemos?')){fetch('/hard_reset',{method:'POST',credentials:'include'}).then(r=>r.text()).then(t=>{document.body.innerHTML=t;});}return false;">Hard Reset</a>
   </div>
 )rawliteral";
 
